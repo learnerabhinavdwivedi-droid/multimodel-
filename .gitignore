@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+
+# Node / React
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+app/dashboard/node_modules/
+app/dashboard/dist/
+app/dashboard/build/
+
+# Mac/OSX
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# Project specific data (if meant to be excluded)
+# data/raw/
+# data/processed/

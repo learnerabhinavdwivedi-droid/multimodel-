@@ -1,41 +1,45 @@
 import React from 'react';
 
-const SEVERITY_COLORS = [
-  'var(--sev-0)', // 0: Green
-  'var(--sev-1)', // 1: Yellow-Green
-  'var(--sev-2)', // 2: Yellow
-  'var(--sev-3)', // 3: Orange
-  'var(--sev-4)'  // 4: Red
-];
-
-const SEVERITY_LABELS = [
-  'Ideal',
-  'Barely Noticeable',
-  'Clearly Noticeable',
-  'Distracting',
-  'Severely Botched'
-];
-
-export const getSeverityColor = (score) => {
-  const index = Math.max(0, Math.min(4, Math.round(score)));
-  return SEVERITY_COLORS[index];
+export const getSeverityColor = (severity) => {
+  switch (severity) {
+    case 0: return '#10B981'; // green
+    case 1: return '#84CC16'; // lime
+    case 2: return '#F59E0B'; // amber
+    case 3: return '#F97316'; // orange
+    case 4: return '#EF4444'; // red
+    default: return '#6B7280'; // gray
+  }
 };
 
-export const getSeverityLabel = (score) => {
-  const index = Math.max(0, Math.min(4, Math.round(score)));
-  return SEVERITY_LABELS[index];
+export const getSeverityLabel = (severity) => {
+  switch (severity) {
+    case 0: return 'Perfect';
+    case 1: return 'Slight';
+    case 2: return 'Moderate';
+    case 3: return 'Severe';
+    case 4: return 'Critical';
+    default: return 'Unknown';
+  }
 };
 
-export const SeverityChip = ({ score }) => {
-  const color = getSeverityColor(score);
-  const label = getSeverityLabel(score);
+export const SeverityChip = ({ severity }) => {
+  const color = getSeverityColor(severity);
+  const label = getSeverityLabel(severity);
+
+  const style = {
+    backgroundColor: color,
+    color: '#FFFFFF',
+    padding: '4px 12px',
+    borderRadius: '9999px',
+    fontSize: '0.75rem',
+    fontWeight: '600',
+    display: 'inline-block',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em'
+  };
 
   return (
-    <span 
-      className="severity-chip" 
-      style={{ backgroundColor: color }}
-      title={`Score: ${score}`}
-    >
+    <span style={style}>
       {label}
     </span>
   );

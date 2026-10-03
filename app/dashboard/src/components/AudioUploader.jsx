@@ -1,79 +1,217 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useDropzone } from 'react-dropzone';
-import { UploadCloud, Play } from 'lucide-react';
+import { UploadCloud, Play, Check, FileAudio } from 'lucide-react';
 
-const AudioUploader = ({ onUpload, onDemo }) => {
-  const [idealFile, setIdealFile] = useState(null);
-  const [participantFile, setParticipantFile] = useState(null);
-  const [transcript, setTranscript] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
+const AudioUploader = ({ onUpload, onDemoData }) => {
+  const [idealAudio, setIdealAudio] = React.useState(null);
+  const [participantAudio, setParticipantAudio] = React.useState(null);
+  const [transcript, setTranscript] = React.useState('');
+  const [isLoading, setIsLoading] = React.useState(false);
 
-  const { getRootProps: getIdealProps, getInputProps: getIdealInputProps } = useDropzone({
-    accept: {'audio/*': ['.wav', '.mp3', '.m4a']},
-    maxFiles: 1,
-    onDrop: accepted => setIdealFile(accepted[0])
+  const onDropIdeal = (acceptedFiles) => setIdealAudio(acceptedFiles[0]);
+  const onDropParticipant = (acceptedFiles) => setParticipantAudio(acceptedFiles[0]);
+
+  const { getRootProps: getIdealProps, getInputProps: getIdealInputProps, isDragActive: idealDragActive } = useDropzone({
+    onDrop: onDropIdeal,
+    accept: { 'audio/*': [] },
+    maxFiles: 1
   });
 
-  const { getRootProps: getParticipantProps, getInputProps: getParticipantInputProps } = useDropzone({
-    accept: {'audio/*': ['.wav', '.mp3', '.m4a']},
-    maxFiles: 1,
-    onDrop: accepted => setParticipantFile(accepted[0])
+  const { getRootProps: getParticipantProps, getInputProps: getParticipantInputProps, isDragActive: participantDragActive } = useDropzone({
+    onDrop: onDropParticipant,
+    accept: { 'audio/*': [] },
+    maxFiles: 1
   });
 
-  const handleSubmit = async () => {
-    if (!idealFile || !participantFile) return;
-    setIsUploading(true);
-    await onUpload(idealFile, participantFile, transcript);
-    setIsUploading(false);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!idealAudio || !participantAudio) return;
+    setIsLoading(true);
+    await onUpload({ idealAudio, participantAudio, transcript });
+    setIsLoading(false);
+  };
+
+  const handleDemo = async () => {
+    setIsLoading(true);
+    await onDemoData();
+    setIsLoading(false);
+  };
+
+  const styles = {
+    container: {
+      backgroundColor: '#FFFFFF',
+      padding: '24px',
+      borderRadius: '12px',
+      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+      marginBottom: '24px',
+      fontFamily: 'sans-serif'
+    },
+    title: {
+      fontSize: '1.25rem',
+      fontWeight: '600',
+      color: '#1F2937',
+      marginBottom: '16px'
+    },
+    dropzones: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '24px',
+      marginBottom: '24px'
+    },
+    dropzone: (isActive) => ({
+      border: `2px dashed ${isActive ? '#7C3AED' : '#DDD6FE'}`,
+      backgroundColor: isActive ? '#F3F4F6' : '#FFFFFF',
+      borderRadius: '8px',
+      padding: '32px 16px',
+      textAlign: 'center',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '12px'
+    }),
+    dropzoneText: {
+      color: '#4B5563',
+      fontSize: '0.875rem'
+    },
+    icon: {
+      color: '#7C3AED'
+    },
+    fileSelected: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      color: '#7C3AED',
+      fontWeight: '500',
+      fontSize: '0.875rem'
+    },
+    transcriptArea: {
+      width: '100%',
+      minHeight: '100px',
+      padding: '12px',
+      borderRadius: '8px',
+      border: '1px solid #E5E7EB',
+      backgroundColor: '#FFFFFF',
+      color: '#1F2937',
+      marginBottom: '24px',
+      resize: 'vertical',
+      outline: 'none',
+      fontSize: '0.875rem',
+      boxSizing: 'border-box'
+    },
+    transcriptLabel: {
+      display: 'block',
+      color: '#374151',
+      marginBottom: '8px',
+      fontWeight: '500',
+      fontSize: '0.875rem'
+    },
+    actions: {
+      display: 'flex',
+      gap: '16px',
+      alignItems: 'center'
+    },
+    submitBtn: {
+      background: 'linear-gradient(135deg, #7C3AED, #A78BFA)',
+      color: 'white',
+      border: 'none',
+      padding: '10px 24px',
+      borderRadius: '8px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      transition: 'opacity 0.2s',
+      opacity: (!idealAudio || !participantAudio || isLoading) ? 0.6 : 1
+    },
+    demoBtn: {
+      background: '#FFFFFF',
+      color: '#7C3AED',
+      border: '1px solid #7C3AED',
+      padding: '10px 24px',
+      borderRadius: '8px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
+    },
+    spinner: {
+      animation: 'spin 1s linear infinite',
+      color: '#FFFFFF'
+    }
   };
 
   return (
-    <div className="panel">
-      <h2>Upload Recordings</h2>
-      <div className="dropzone-container">
-        <div {...getIdealProps()} className="dropzone" style={{ borderColor: idealFile ? 'var(--sev-0)' : 'var(--border-color)' }}>
+    <div style={styles.container}>
+      <h2 style={styles.title}>Upload Audio</h2>
+      <div style={styles.dropzones}>
+        <div {...getIdealProps()} style={styles.dropzone(idealDragActive)}>
           <input {...getIdealInputProps()} />
-          <UploadCloud size={32} color="var(--text-muted)" style={{ marginBottom: '10px' }} />
-          <div>{idealFile ? idealFile.name : "Drop Ideal Reference Audio"}</div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '5px' }}>WAV, MP3, M4A</div>
+          {idealAudio ? (
+            <div style={styles.fileSelected}>
+              <Check size={20} />
+              <span>{idealAudio.name}</span>
+            </div>
+          ) : (
+            <>
+              <UploadCloud size={32} style={styles.icon} />
+              <p style={styles.dropzoneText}>Drag & drop Ideal Audio, or click to select</p>
+            </>
+          )}
         </div>
-
-        <div {...getParticipantProps()} className="dropzone" style={{ borderColor: participantFile ? 'var(--sev-0)' : 'var(--border-color)' }}>
+        <div {...getParticipantProps()} style={styles.dropzone(participantDragActive)}>
           <input {...getParticipantInputProps()} />
-          <UploadCloud size={32} color="var(--text-muted)" style={{ marginBottom: '10px' }} />
-          <div>{participantFile ? participantFile.name : "Drop Participant Audio"}</div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '5px' }}>WAV, MP3, M4A</div>
+          {participantAudio ? (
+            <div style={styles.fileSelected}>
+              <Check size={20} />
+              <span>{participantAudio.name}</span>
+            </div>
+          ) : (
+            <>
+              <FileAudio size={32} style={styles.icon} />
+              <p style={styles.dropzoneText}>Drag & drop Participant Audio, or click to select</p>
+            </>
+          )}
         </div>
       </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)' }}>Shared Transcript (Optional)</label>
-        <textarea 
+      <div>
+        <label style={styles.transcriptLabel}>Target Transcript (Optional)</label>
+        <textarea
+          style={styles.transcriptArea}
+          placeholder="Enter the expected transcript to improve alignment accuracy..."
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
-          placeholder="Paste the transcript text here to improve alignment..."
-          style={{ 
-            width: '100%', height: '80px', padding: '10px', 
-            background: 'var(--bg-card)', color: 'var(--text-main)', 
-            border: '1px solid var(--border-color)', borderRadius: '6px'
-          }}
+          onFocus={(e) => e.target.style.borderColor = '#7C3AED'}
+          onBlur={(e) => e.target.style.borderColor = '#E5E7EB'}
         />
       </div>
-
-      <div style={{ display: 'flex', alignItems: 'center' }}>
+      <div style={styles.actions}>
         <button 
-          className="upload-btn" 
+          style={styles.submitBtn} 
           onClick={handleSubmit} 
-          disabled={!idealFile || !participantFile || isUploading}
-          style={{ opacity: (!idealFile || !participantFile || isUploading) ? 0.5 : 1 }}
+          disabled={!idealAudio || !participantAudio || isLoading}
         >
-          {isUploading ? 'Analyzing...' : 'Analyze Speech'}
+          {isLoading ? (
+            <UploadCloud size={20} style={styles.spinner} />
+          ) : (
+            <Play size={20} />
+          )}
+          Analyze Speech
         </button>
-        <span style={{ margin: '0 15px', color: 'var(--text-muted)' }}>OR</span>
-        <button className="demo-btn" onClick={onDemo} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Play size={16} /> Try Demo Data
+        <button style={styles.demoBtn} onClick={handleDemo} disabled={isLoading}>
+          Try Demo Data
         </button>
       </div>
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 };

@@ -4,192 +4,237 @@ import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
 import { Play, Pause, Square } from 'lucide-react';
 
-const FLAW_COLORS = {
-  rushed_pace: 'rgba(255, 107, 107, 0.4)',
-  dead_pause: 'rgba(255, 217, 61, 0.4)',
-  flat_pitch: 'rgba(107, 203, 119, 0.4)',
-  mumbled_clarity: 'rgba(77, 150, 255, 0.4)'
-};
+const DualWaveform = ({ idealUrl, participantUrl, flaws }) => {
+  const idealContainerRef = useRef(null);
+  const participantContainerRef = useRef(null);
+  const timelineRef = useRef(null);
+  
+  const [idealWs, setIdealWs] = useState(null);
+  const [participantWs, setParticipantWs] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
-// Generate a short silent WAV as a data URL for demo mode (no real audio files)
-function generateSilentWav(durationSec = 15, sampleRate = 16000) {
-  const numSamples = sampleRate * durationSec;
-  const buffer = new ArrayBuffer(44 + numSamples * 2);
-  const view = new DataView(buffer);
-
-  const writeString = (offset, str) => {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  const generateSilentWav = () => {
+    const sampleRate = 44100;
+    const duration = 1; // 1 sec
+    const numSamples = sampleRate * duration;
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+    
+    const writeString = (offset, string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+    
+    const blob = new Blob([buffer], { type: 'audio/wav' });
+    return URL.createObjectURL(blob);
   };
 
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + numSamples * 2, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(36, 'data');
-  view.setUint32(40, numSamples * 2, true);
-
-  // Generate a very quiet sine wave so the waveform isn't completely flat
-  for (let i = 0; i < numSamples; i++) {
-    const t = i / sampleRate;
-    // Mix of low-amplitude sine waves to simulate speech-like waveform
-    const sample = Math.sin(2 * Math.PI * 200 * t) * 0.02 +
-                   Math.sin(2 * Math.PI * 440 * t) * 0.01 * Math.sin(2 * Math.PI * 0.5 * t);
-    view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, sample * 32767)), true);
-  }
-
-  const blob = new Blob([buffer], { type: 'audio/wav' });
-  return URL.createObjectURL(blob);
-}
-
-const DualWaveform = ({ idealUrl, participantUrl, regions, jumpTime }) => {
-  const idealContainerRef = useRef(null);
-  const partContainerRef = useRef(null);
-
-  const idealWs = useRef(null);
-  const partWs = useRef(null);
-
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-
   useEffect(() => {
-    if (!idealContainerRef.current || !partContainerRef.current) return;
+    if (!idealContainerRef.current || !participantContainerRef.current) return;
 
-    const demoAudioUrl = generateSilentWav(15);
-
-    // Initialize Ideal WaveSurfer
-    idealWs.current = WaveSurfer.create({
+    const wsIdeal = WaveSurfer.create({
       container: idealContainerRef.current,
-      waveColor: '#4d96ff',
-      progressColor: '#1e5fba',
-      height: 100,
+      waveColor: '#7C3AED',
+      progressColor: '#5B21B6',
+      height: 80,
       normalize: true,
       plugins: [
-        TimelinePlugin.create()
+        TimelinePlugin.create({
+          container: timelineRef.current,
+          height: 20,
+          timeInterval: 1,
+          primaryLabelInterval: 5,
+          style: {
+            fontSize: '12px',
+            color: '#6B7280',
+          }
+        }),
+        RegionsPlugin.create()
       ]
     });
 
-    // Initialize Participant WaveSurfer
-    partWs.current = WaveSurfer.create({
-      container: partContainerRef.current,
-      waveColor: '#ff6b6b',
-      progressColor: '#ba2a2a',
-      height: 100,
+    const wsParticipant = WaveSurfer.create({
+      container: participantContainerRef.current,
+      waveColor: '#EF4444',
+      progressColor: '#B91C1C',
+      height: 80,
       normalize: true,
       plugins: [
-        TimelinePlugin.create()
+        RegionsPlugin.create()
       ]
     });
 
-    const wsRegions = partWs.current.registerPlugin(RegionsPlugin.create());
+    setIdealWs(wsIdeal);
+    setParticipantWs(wsParticipant);
 
-    // Load audio
-    idealWs.current.load(idealUrl || demoAudioUrl);
-    partWs.current.load(participantUrl || demoAudioUrl);
+    wsIdeal.load(idealUrl || generateSilentWav());
+    wsParticipant.load(participantUrl || generateSilentWav());
 
-    // Sync play/pause
-    idealWs.current.on('play', () => { if (partWs.current) partWs.current.play(); setIsPlaying(true); });
-    idealWs.current.on('pause', () => { if (partWs.current) partWs.current.pause(); setIsPlaying(false); });
-
-    // Sync seeking
-    let syncing = false;
-    idealWs.current.on('seeking', (currentTime) => {
-      if (syncing) return;
-      syncing = true;
-      const duration = partWs.current.getDuration();
-      if (duration > 0) partWs.current.seekTo(currentTime / duration);
-      syncing = false;
-    });
-    partWs.current.on('seeking', (currentTime) => {
-      if (syncing) return;
-      syncing = true;
-      const duration = idealWs.current.getDuration();
-      if (duration > 0) idealWs.current.seekTo(currentTime / duration);
-      syncing = false;
-    });
-
-    Promise.all([
-      new Promise(res => idealWs.current.on('ready', res)),
-      new Promise(res => partWs.current.on('ready', res))
-    ]).then(() => {
-      setIsReady(true);
-
-      // Draw flaw regions
-      if (regions) {
-        regions.forEach(r => {
-          wsRegions.addRegion({
-            start: r.start,
-            end: r.end,
-            color: FLAW_COLORS[r.type] || 'rgba(255, 255, 255, 0.2)',
-            drag: false,
-            resize: false,
-          });
-        });
-      }
-    });
+    wsIdeal.on('play', () => { wsParticipant.play(); setIsPlaying(true); });
+    wsIdeal.on('pause', () => { wsParticipant.pause(); setIsPlaying(false); });
+    wsIdeal.on('seeking', (time) => wsParticipant.setTime(time));
 
     return () => {
-      idealWs.current?.destroy();
-      partWs.current?.destroy();
-      URL.revokeObjectURL(demoAudioUrl);
+      wsIdeal.destroy();
+      wsParticipant.destroy();
     };
-  }, [idealUrl, participantUrl, regions]);
+  }, [idealUrl, participantUrl]);
 
-  // Handle external jumpTime prop
   useEffect(() => {
-    if (jumpTime !== null && idealWs.current && isReady) {
-      const duration = idealWs.current.getDuration();
-      if (duration > 0) {
-        idealWs.current.seekTo(jumpTime / duration);
-      }
-    }
-  }, [jumpTime, isReady]);
+    if (!idealWs || !participantWs || !flaws) return;
 
-  const togglePlay = () => {
-    if (idealWs.current) {
-      idealWs.current.playPause();
+    const idealRegions = idealWs.registerPlugin(RegionsPlugin.create());
+    const participantRegions = participantWs.registerPlugin(RegionsPlugin.create());
+
+    flaws.forEach((flaw, index) => {
+      const color = 'rgba(124, 58, 237, 0.2)'; 
+      
+      participantRegions.addRegion({
+        start: flaw.start_time,
+        end: flaw.end_time,
+        color: color,
+        drag: false,
+        resize: false,
+        content: flaw.type.replace('_', ' ')
+      });
+    });
+
+  }, [idealWs, participantWs, flaws]);
+
+  const handlePlayPause = () => {
+    if (idealWs) {
+      idealWs.playPause();
     }
   };
 
-  const stopPlay = () => {
-    if (idealWs.current) {
-      idealWs.current.stop();
+  const handleStop = () => {
+    if (idealWs && participantWs) {
+      idealWs.stop();
+      participantWs.stop();
+      idealWs.seekTo(0);
+      setIsPlaying(false);
     }
-    if (partWs.current) {
-      partWs.current.stop();
+  };
+
+  const styles = {
+    container: {
+      backgroundColor: '#FFFFFF',
+      padding: '24px',
+      borderRadius: '12px',
+      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)',
+      fontFamily: 'sans-serif',
+      marginBottom: '24px'
+    },
+    title: {
+      fontSize: '1.25rem',
+      fontWeight: '600',
+      color: '#1F2937',
+      marginBottom: '16px'
+    },
+    controls: {
+      display: 'flex',
+      gap: '12px',
+      marginBottom: '24px',
+      alignItems: 'center'
+    },
+    btn: {
+      background: '#F3F4F6',
+      border: '1px solid #E5E7EB',
+      borderRadius: '8px',
+      padding: '8px 16px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      color: '#4B5563',
+      fontWeight: '500',
+      transition: 'all 0.2s'
+    },
+    btnPrimary: {
+      background: 'linear-gradient(135deg, #7C3AED, #A78BFA)',
+      color: 'white',
+      border: 'none',
+      padding: '8px 16px',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      fontWeight: '500'
+    },
+    tracks: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '16px'
+    },
+    trackWrap: {
+      position: 'relative',
+      backgroundColor: '#F9FAFB',
+      border: '1px solid #E5E7EB',
+      borderRadius: '8px',
+      padding: '8px'
+    },
+    trackLabel: (color) => ({
+      position: 'absolute',
+      top: '8px',
+      left: '8px',
+      zIndex: 10,
+      backgroundColor: '#FFFFFF',
+      color: '#374151',
+      fontSize: '0.75rem',
+      fontWeight: '600',
+      padding: '4px 8px',
+      borderRadius: '4px',
+      borderLeft: `3px solid ${color}`,
+      boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+    }),
+    timeline: {
+      marginTop: '8px',
+      opacity: 0.8
     }
-    setIsPlaying(false);
   };
 
   return (
-    <div className="panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h2 style={{ margin: 0 }}>Waveform Analysis</h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button className="demo-btn" onClick={togglePlay} disabled={!isReady} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-            {isPlaying ? 'Pause' : 'Play Both'}
-          </button>
-          <button className="demo-btn" onClick={stopPlay} disabled={!isReady}>
-            <Square size={18} />
-          </button>
+    <div style={styles.container}>
+      <h2 style={styles.title}>Audio Waveforms</h2>
+      
+      <div style={styles.controls}>
+        <button style={styles.btnPrimary} onClick={handlePlayPause}>
+          {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+        <button style={styles.btn} onClick={handleStop}>
+          <Square size={18} /> Stop
+        </button>
+      </div>
+
+      <div style={styles.tracks}>
+        <div style={styles.trackWrap}>
+          <div style={styles.trackLabel('#7C3AED')}>Ideal Reference</div>
+          <div ref={idealContainerRef} />
         </div>
-      </div>
+        
+        <div style={styles.trackWrap}>
+          <div style={styles.trackLabel('#EF4444')}>Participant</div>
+          <div ref={participantContainerRef} />
+        </div>
 
-      <div className="wave-container">
-        <div className="wave-label">Ideal Reference</div>
-        <div ref={idealContainerRef}></div>
-      </div>
-
-      <div className="wave-container">
-        <div className="wave-label">Participant Recording</div>
-        <div ref={partContainerRef}></div>
+        <div ref={timelineRef} style={styles.timeline} />
       </div>
     </div>
   );
