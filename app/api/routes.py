@@ -4,10 +4,11 @@ import json
 import shutil
 import logging
 import subprocess
+import re
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
-from app.api.schemas import UploadResponse, AnalyzeRequest, DetectionResult, Alignment, Region, Evidence, Scores, Run
+from app.api.schemas import UploadResponse, AnalyzeRequest, DetectionResult, Alignment, Region, Evidence, Scores, Run, Timelines, ChannelTimeline
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,6 +34,23 @@ def convert_to_wav16k_mono(input_path: Path, output_path: Path):
         logger.error(f"FFmpeg conversion failed: {e.stderr.decode()}")
         raise RuntimeError("Audio conversion failed")
 
+def sanitize_filename(filename: str) -> str:
+    """Remove path separators and dangerous characters from filename."""
+    # Take only the basename
+    name = Path(filename).name
+    # Remove any remaining path separators or null bytes
+    name = re.sub(r'[\\/:*?"<>|\x00]', '_', name)
+    return name if name else 'upload'
+
+def validate_uuid(value: str) -> bool:
+    """Check if value is a valid UUID4 format."""
+    try:
+        import uuid as uuid_mod
+        uuid_mod.UUID(value, version=4)
+        return True
+    except ValueError:
+        return False
+
 @router.get("/health")
 def health_check():
     return {"status": "ok", "service": "SpeechMirror API"}
@@ -48,8 +66,8 @@ async def upload_audio(
     
     try:
         # Save raw uploads
-        ideal_raw = session_dir / f"ideal_raw_{ideal.filename}"
-        participant_raw = session_dir / f"participant_raw_{participant.filename}"
+        ideal_raw = session_dir / f"ideal_raw_{sanitize_filename(ideal.filename)}"
+        participant_raw = session_dir / f"participant_raw_{sanitize_filename(participant.filename)}"
         
         with open(ideal_raw, "wb") as f:
             shutil.copyfileobj(ideal.file, f)
@@ -80,6 +98,9 @@ async def upload_audio(
 @router.post("/api/analyze", response_model=DetectionResult)
 async def analyze_audio(request: AnalyzeRequest, background_tasks: BackgroundTasks):
     upload_id = request.upload_id
+    if not validate_uuid(upload_id):
+        raise HTTPException(status_code=400, detail="Invalid upload ID format")
+    
     session_dir = UPLOAD_DIR / upload_id
     
     if not session_dir.exists():
@@ -92,49 +113,124 @@ async def analyze_audio(request: AnalyzeRequest, background_tasks: BackgroundTas
         raise HTTPException(status_code=400, detail="Audio files missing for upload ID")
 
     try:
-        # NOTE: Import your pipeline here when fully integrated
-        # from src.speechmirror.pipeline import run_pipeline
-        # result = run_pipeline(ideal_wav, participant_wav, request.transcript)
+        import json as json_mod
+        from src.speechmirror.pipeline import SpeechMirrorPipeline
         
-        logger.info(f"Running analysis for upload {upload_id} with transcript: {request.transcript[:30]}...")
+        # Load config
+        config_path = Path("configs/pipeline.json")
+        config = {}
+        if config_path.exists():
+            with open(config_path, 'r') as cf:
+                config = json_mod.load(cf)
         
-        # Mock result for now
-        result = DetectionResult(
-            sample_id=upload_id,
-            alignment=Alignment(method="fallback", wer=0.03, mean_conf=0.94),
-            regions=[
-                Region(
-                    type="rushed_pace",
-                    start=14.2,
-                    end=19.1,
-                    severity=3,
-                    confidence=0.87,
-                    evidence=[
-                        Evidence(feature="speech_rate_ratio", ref=4.5, obs=6.2, delta_pct=37.8, z=2.8)
-                    ],
-                    explanation="pace +38% at 0:14.2–0:19.1 (6.2 words/s vs ideal 4.5 words/s)"
-                )
-            ],
-            scores=Scores(pace=3, pause=0, pitch=0, energy=1, clarity=0, overall=2.15),
-            run=Run(commit="unknown", config_hash="unknown", seed=42)
+        logger.info(f"Running analysis for upload {upload_id}...")
+        
+        pipe = SpeechMirrorPipeline(model_size="base")
+        ideal_feats = pipe.extract_features(str(ideal_wav))
+        part_feats = pipe.extract_features(str(participant_wav))
+        deltas = pipe.compute_deltas(part_feats, ideal_feats)
+        flaws = pipe.detect_flaws(deltas, config)
+        
+        # Build regions from pipeline output
+        regions = []
+        for f in flaws:
+            regions.append(Region(
+                type=f["type"],
+                start=f["start"],
+                end=f["end"],
+                severity=f["severity"],
+                confidence=min(1.0, f["severity"] / 4.0),
+                evidence=[Evidence(
+                    feature=f["type"],
+                    ref=0.0,
+                    obs=float(f["severity"]),
+                    delta_pct=0.0,
+                    z=0.0
+                )],
+                explanation=f.get("explanation", "")
+            ))
+        
+        # Compute scores from flaw severities
+        score_map = {'rushed_pace': 0, 'dead_pause': 0, 'flat_pitch': 0, 'mumbled_clarity': 0}
+        for f in flaws:
+            score_map[f['type']] = max(score_map.get(f['type'], 0), f['severity'])
+        
+        scores = Scores(
+            pace=float(score_map.get('rushed_pace', 0)),
+            pause=float(score_map.get('dead_pause', 0)),
+            pitch=float(score_map.get('flat_pitch', 0)),
+            energy=0.0,
+            clarity=float(score_map.get('mumbled_clarity', 0)),
+            overall=float(sum(score_map.values()) / max(1, len([v for v in score_map.values() if v > 0]))) if any(score_map.values()) else 0.0
         )
         
-        # Save result (optional, since it will be returned and session deleted)
+        # Build timelines from frame-level features
+        import numpy as np
+        n_frames = len(ideal_feats['frame_times'])
+        p_frames = len(part_feats['frame_times'])
+        n_timeline = min(n_frames, p_frames, 200)  # Cap for frontend performance
+        
+        # Downsample if needed
+        def downsample(arr, target_len):
+            if len(arr) <= target_len:
+                return arr.tolist() if hasattr(arr, 'tolist') else list(arr)
+            indices = np.linspace(0, len(arr) - 1, target_len, dtype=int)
+            result = np.array(arr)[indices]
+            return result.tolist()
+        
+        timelines = Timelines(
+            time=downsample(part_feats['frame_times'], n_timeline),
+            ideal=ChannelTimeline(
+                rate=[0.0] * n_timeline,  # Rate is word-level, not frame-level
+                pitch=downsample(ideal_feats['features']['f0_semitones'], n_timeline),
+                energy=downsample(ideal_feats['features']['rms_db'], n_timeline)
+            ),
+            participant=ChannelTimeline(
+                rate=[0.0] * n_timeline,
+                pitch=downsample(part_feats['features']['f0_semitones'], n_timeline),
+                energy=downsample(part_feats['features']['rms_db'], n_timeline)
+            )
+        )
+        
+        # Compute speech rate from word timings if available
+        for label, feats, channel in [('ideal', ideal_feats, timelines.ideal), ('participant', part_feats, timelines.participant)]:
+            words = feats.get('words', [])
+            if words and len(words) >= 2:
+                rates = []
+                for wi in range(len(words)):
+                    start_i = max(0, wi - 2)
+                    end_i = min(len(words) - 1, wi + 2)
+                    window_dur = words[end_i]['end'] - words[start_i]['start']
+                    if window_dur > 0:
+                        rates.append((end_i - start_i + 1) / window_dur)
+                    else:
+                        rates.append(0.0)
+                channel.rate = downsample(rates, n_timeline)
+        
+        result = DetectionResult(
+            sample_id=upload_id,
+            alignment=Alignment(method="whisper", wer=0.0, mean_conf=0.9),
+            regions=regions,
+            scores=scores,
+            run=Run(commit="local", config_hash="local", seed=42),
+            timelines=timelines
+        )
+        
+        # Save result for later retrieval
         result_file = session_dir / "result.json"
         with open(result_file, "w") as f:
             f.write(result.model_dump_json())
             
-        # NFR-3 privacy: schedule session deletion after response is sent
-        background_tasks.add_task(shutil.rmtree, session_dir, ignore_errors=True)
-        
         logger.info(f"Analysis completed successfully for {upload_id}")
         return result
     except Exception as e:
-        logger.error(f"Analysis failed: {str(e)}")
+        logger.error(f"Analysis failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @router.get("/api/results/{result_id}", response_model=DetectionResult)
 async def get_result(result_id: str):
+    if not validate_uuid(result_id):
+        raise HTTPException(status_code=400, detail="Invalid result ID format")
     session_dir = UPLOAD_DIR / result_id
     result_file = session_dir / "result.json"
     
@@ -190,7 +286,11 @@ async def get_demo():
 
 @router.get("/api/demo/audio/{filename}")
 async def get_demo_audio(filename: str):
-    file_path = DEMO_DIR / filename
+    # Prevent path traversal
+    safe_name = sanitize_filename(filename)
+    if safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    file_path = DEMO_DIR / safe_name
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Demo audio file not found")
     return FileResponse(file_path, media_type="audio/wav")

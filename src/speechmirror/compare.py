@@ -175,9 +175,11 @@ def compare_aligned_pair(
         p_f0_range = np.ptp(p_feats['f0'][p_feats['f0'] > 0]) if np.any(p_feats['f0'] > 0) else 0.0
         f0_range_ratio = p_f0_range / i_f0_range if i_f0_range > 0 else 1.0
         
-        # Energy
-        i_energy = normalize_energy_db(np.array([np.mean(i_feats['rms'])]))[0]
-        p_energy = normalize_energy_db(np.array([np.mean(p_feats['rms'])]))[0]
+        # Energy - normalize both together so median reference is shared
+        combined_rms = np.array([np.mean(i_feats['rms']), np.mean(p_feats['rms'])])
+        normalized_energy = normalize_energy_db(combined_rms)
+        i_energy = normalized_energy[0]
+        p_energy = normalized_energy[1]
         energy_delta = p_energy - i_energy
         
         # Spectral

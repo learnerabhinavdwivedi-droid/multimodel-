@@ -40,18 +40,20 @@ class FlawDetector:
     def __init__(self, config_path: str = 'configs/pipeline.json'):
         self.config_path = config_path
         self.config = self._load_config()
+        # Map pipeline.json flat keys to structured thresholds
         self.thresholds = self.config.get('detection_thresholds', {
-            'rushed_pace': {'rate_ratio_min': 1.25, 'gap_compression_max': 0.8},
-            'dead_pause': {'excess_pause_min': 0.4},
+            'rushed_pace': {'rate_ratio_min': 1.0 / max(0.01, abs(self.config.get('rushed_thresh', -0.05))) if self.config.get('rushed_thresh') else 1.25, 'gap_compression_max': 0.8},
+            'dead_pause': {'excess_pause_min': self.config.get('pause_thresh', 0.4)},
             'flat_pitch': {'f0_var_ratio_max': 0.6, 'f0_range_ratio_max': 0.7},
-            'mumbled_clarity': {'energy_drop_max': -2.5, 'centroid_ratio_max': 0.8}
+            'mumbled_clarity': {'energy_drop_max': self.config.get('clarity_thresh', -0.15), 'centroid_ratio_max': 0.8}
         })
-        self.weights = self.config.get('scoring_weights', {
-            'pace': 0.25,
-            'pause': 0.25,
-            'pitch': 0.25,
-            'clarity': 0.25
-        })
+        weights_raw = self.config.get('weights', self.config.get('scoring_weights', {}))
+        self.weights = {
+            'pace': weights_raw.get('rushed_pace', weights_raw.get('pace', 0.25)),
+            'pause': weights_raw.get('dead_pause', weights_raw.get('pause', 0.25)),
+            'pitch': weights_raw.get('flat_pitch', weights_raw.get('pitch', 0.25)),
+            'clarity': weights_raw.get('mumbled_clarity', weights_raw.get('clarity', 0.25))
+        }
 
     def _load_config(self) -> dict[str, Any]:
         path = Path(self.config_path)
@@ -87,7 +89,7 @@ class FlawDetector:
             scores=scores,
             alignment_method=participant_alignment.method,
             alignment_wer=participant_alignment.wer,
-            alignment_confidence=participant_alignment.confidence
+            alignment_confidence=participant_alignment.mean_confidence
         )
 
     def _detect_rushed_pace(self, words: list[WordComparison]) -> list[DetectedRegion]:
@@ -95,8 +97,11 @@ class FlawDetector:
         th = self.thresholds['rushed_pace']
         
         for idx, w in enumerate(words):
-            if w.ref_duration > 0:
-                rate_ratio = (w.ref_duration / w.obs_duration) if hasattr(w, 'obs_duration') and w.obs_duration > 0 else 0
+            # speech_rate_ratio is participant_dur / ideal_dur
+            # A ratio < 1 means participant was faster (rushed)
+            ref_duration = w.ideal_end - w.ideal_start
+            if ref_duration > 0:
+                rate_ratio = 1.0 / w.speech_rate_ratio if w.speech_rate_ratio > 0 else 0
                 if rate_ratio > th['rate_ratio_min']:
                     mag = rate_ratio - th['rate_ratio_min']
                     sev = self._estimate_severity('rushed_pace', mag)
@@ -110,8 +115,8 @@ class FlawDetector:
                     }]
                     regions.append(DetectedRegion(
                         flaw_type='rushed_pace',
-                        start_sec=w.obs_start,
-                        end_sec=w.obs_end,
+                        start_sec=w.participant_start,
+                        end_sec=w.participant_end,
                         severity=sev,
                         confidence=conf,
                         evidence=evidence,
@@ -127,24 +132,25 @@ class FlawDetector:
             w1 = words[idx]
             w2 = words[idx + 1]
             
-            obs_gap = w2.obs_start - w1.obs_end
-            ref_gap = w2.ref_start - w1.ref_end
-            excess_pause = obs_gap - ref_gap
+            # Use pause_excess_s which is already computed in compare.py
+            excess_pause = w2.pause_excess_s
             
             if excess_pause > th['excess_pause_min']:
                 sev = self._estimate_severity('dead_pause', excess_pause)
                 conf = min(1.0, excess_pause / 2.0)
+                obs_gap = w2.participant_start - w1.participant_end
+                ref_gap = w2.ideal_start - w1.ideal_end
                 evidence = [{
                     'feature': 'excess_pause',
-                    'ref_value': ref_gap,
-                    'obs_value': obs_gap,
+                    'ref_value': max(0, ref_gap),
+                    'obs_value': max(0, obs_gap),
                     'delta_pct': None,
                     'z_score': None
                 }]
                 regions.append(DetectedRegion(
                     flaw_type='dead_pause',
-                    start_sec=w1.obs_end,
-                    end_sec=w2.obs_start,
+                    start_sec=w1.participant_end,
+                    end_sec=w2.participant_start,
                     severity=sev,
                     confidence=conf,
                     evidence=evidence,
@@ -157,10 +163,9 @@ class FlawDetector:
         th = self.thresholds['flat_pitch']
         
         for idx, w in enumerate(words):
-            if not hasattr(w, 'obs_f0_var') or not hasattr(w, 'ref_f0_var'):
-                continue
-                
-            f0_var_ratio = w.obs_f0_var / w.ref_f0_var if w.ref_f0_var > 0 else 1.0
+            # f0_variance_ratio is participant_f0_var / ideal_f0_var
+            # A ratio < threshold means participant had less pitch variation (flat)
+            f0_var_ratio = w.f0_variance_ratio
             
             if f0_var_ratio < th['f0_var_ratio_max']:
                 mag = th['f0_var_ratio_max'] - f0_var_ratio
@@ -175,8 +180,8 @@ class FlawDetector:
                 }]
                 regions.append(DetectedRegion(
                     flaw_type='flat_pitch',
-                    start_sec=w.obs_start,
-                    end_sec=w.obs_end,
+                    start_sec=w.participant_start,
+                    end_sec=w.participant_end,
                     severity=sev,
                     confidence=conf,
                     evidence=evidence,
@@ -189,11 +194,10 @@ class FlawDetector:
         th = self.thresholds['mumbled_clarity']
         
         for idx, w in enumerate(words):
-            if not hasattr(w, 'obs_energy') or not hasattr(w, 'ref_energy'):
-                continue
-                
-            energy_drop = w.obs_energy - w.ref_energy
-            centroid_ratio = w.obs_spectral_centroid / w.ref_spectral_centroid if w.ref_spectral_centroid > 0 else 1.0
+            # energy_delta_db is participant - ideal energy in dB
+            # A negative delta means participant was quieter (mumbled)
+            energy_drop = w.energy_delta_db
+            centroid_ratio = w.spectral_centroid_ratio
             
             if energy_drop < th['energy_drop_max'] and centroid_ratio < th['centroid_ratio_max']:
                 mag = (th['energy_drop_max'] - energy_drop) + (th['centroid_ratio_max'] - centroid_ratio)
@@ -217,8 +221,8 @@ class FlawDetector:
                 ]
                 regions.append(DetectedRegion(
                     flaw_type='mumbled_clarity',
-                    start_sec=w.obs_start,
-                    end_sec=w.obs_end,
+                    start_sec=w.participant_start,
+                    end_sec=w.participant_end,
                     severity=sev,
                     confidence=conf,
                     evidence=evidence,

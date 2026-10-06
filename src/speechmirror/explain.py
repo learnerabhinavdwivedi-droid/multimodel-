@@ -38,8 +38,8 @@ def explain_region(region: Any, comparisons: list) -> FlawExplanation:
     """Generate causal explanation for a detected flaw region."""
     # Handle different possible region attributes depending on actual structure
     flaw_type = getattr(region, 'type', getattr(region, 'flaw_type', 'unknown'))
-    start = getattr(region, 'start_time', getattr(region, 'start', 0.0))
-    end = getattr(region, 'end_time', getattr(region, 'end', 0.0))
+    start = getattr(region, 'start_sec', getattr(region, 'start', 0.0))
+    end = getattr(region, 'end_sec', getattr(region, 'end', 0.0))
     severity = getattr(region, 'severity', 1)
     
     evidence_list = []

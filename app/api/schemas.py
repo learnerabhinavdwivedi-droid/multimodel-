@@ -35,12 +35,23 @@ class Run(BaseModel):
     config_hash: str
     seed: int
 
+class ChannelTimeline(BaseModel):
+    rate: List[float]
+    pitch: List[float]
+    energy: List[float]
+
+class Timelines(BaseModel):
+    time: List[float]
+    ideal: ChannelTimeline
+    participant: ChannelTimeline
+
 class DetectionResult(BaseModel):
     sample_id: str
     alignment: Alignment
     regions: List[Region]
     scores: Scores
     run: Run
+    timelines: Optional[Timelines] = None
 
 class AnalyzeRequest(BaseModel):
     upload_id: str

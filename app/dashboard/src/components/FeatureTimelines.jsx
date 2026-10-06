@@ -1,10 +1,5 @@
 import React from 'react';
-import createPlotlyComponent from 'react-plotly.js/factory';
-import Plotly from 'plotly.js/lib/core';
-import Scatter from 'plotly.js/lib/scatter';
-
-Plotly.register([Scatter]);
-const Plot = createPlotlyComponent(Plotly);
+import Plot from 'react-plotly.js';
 
 const FLAW_COLORS = {
   rushed_pace: 'rgba(239, 68, 68, 0.1)',

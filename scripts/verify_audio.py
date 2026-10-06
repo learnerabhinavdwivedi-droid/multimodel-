@@ -1,9 +1,13 @@
 import os
 import whisper
 import sys
+import argparse
 
 def main():
-    audio_dir = r"c:\Users\sankalp\Desktop\IIT Mandi\Audios"
+    parser = argparse.ArgumentParser(description="Verify audio files")
+    parser.add_argument("--audio-dir", default="Audios", help="Path to audio directory")
+    args = parser.parse_args()
+    audio_dir = args.audio_dir
     if not os.path.exists(audio_dir):
         print(f"Directory {audio_dir} does not exist.")
         return

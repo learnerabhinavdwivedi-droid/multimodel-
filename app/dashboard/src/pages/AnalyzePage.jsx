@@ -8,7 +8,7 @@ import FeatureTimelines from '../components/FeatureTimelines';
 import ExplanationPanel from '../components/ExplanationPanel';
 import RubricScores from '../components/RubricScores';
 import LimitationsPanel from '../components/LimitationsPanel';
-import { getDemoData } from '../api/client';
+import { uploadAudio, analyzeAudio, getDemoData } from '../api/client';
 
 const STYLES = {
   page: { maxWidth: '1400px', margin: '0 auto', fontFamily: "'Inter', system-ui, sans-serif", color: '#1F2937' },
@@ -86,20 +86,19 @@ export default function AnalyzePage() {
       setError(null);
       setCurrentStep(1);
 
-      // Simulate pipeline stages
-      await new Promise(r => setTimeout(r, 1200));
+      // Step 1: Upload audio files
+      const uploadId = await uploadAudio(idealFile, participantFile);
       setCurrentStep(2);
-      await new Promise(r => setTimeout(r, 1500));
 
-      // Load demo data (replace with real API when backend is integrated)
-      const data = await getDemoData();
+      // Step 2: Run analysis
+      const data = await analyzeAudio(uploadId, transcript || '');
       
       setAnalysisData(data);
       setCurrentStep(3);
       setLoading(false);
       useCredit(5, 'Speech Analysis');
     } catch (err) {
-      setError(err.message || 'Failed to analyze audio. Please try again.');
+      setError(err.response?.data?.detail || err.message || 'Failed to analyze audio. Please try again.');
       setLoading(false);
       setCurrentStep(0);
     }
@@ -237,7 +236,7 @@ export default function AnalyzePage() {
                 <LimitationsPanel />
               </div>
               <div style={STYLES.column}>
-                <RubricScores scores={analysisData.overall_scores} />
+                <RubricScores scores={analysisData.scores} />
                 <ExplanationPanel regions={analysisData.regions} onRegionClick={() => {}} />
               </div>
             </div>

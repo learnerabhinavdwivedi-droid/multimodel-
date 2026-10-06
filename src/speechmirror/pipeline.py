@@ -104,13 +104,15 @@ class SpeechMirrorPipeline:
             pause_delta = pw["prev_pause"] - iw["prev_pause"]
             
             # Map word timing to frames to get pitch/energy deltas
+            # Use hop_length matching pyworld's 5ms frame_period
+            pw_hop = int(16000 * 0.005)  # 80 samples = 5ms
             # Participant frames
-            p_start_f = librosa.time_to_frames(pw["start"], sr=16000)
-            p_end_f = librosa.time_to_frames(pw["end"], sr=16000)
+            p_start_f = librosa.time_to_frames(pw["start"], sr=16000, hop_length=pw_hop)
+            p_end_f = librosa.time_to_frames(pw["end"], sr=16000, hop_length=pw_hop)
             
             # Ideal frames
-            i_start_f = librosa.time_to_frames(iw["start"], sr=16000)
-            i_end_f = librosa.time_to_frames(iw["end"], sr=16000)
+            i_start_f = librosa.time_to_frames(iw["start"], sr=16000, hop_length=pw_hop)
+            i_end_f = librosa.time_to_frames(iw["end"], sr=16000, hop_length=pw_hop)
             
             # Extract pitch slice
             p_pitch = part_features["features"]["f0_semitones"][p_start_f:p_end_f]

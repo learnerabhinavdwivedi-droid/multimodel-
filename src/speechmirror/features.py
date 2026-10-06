@@ -12,7 +12,11 @@ from typing import Any, Dict, List, Optional
 
 import librosa
 import numpy as np
-import pyworld as pw
+try:
+    import pyworld as pw
+except ImportError:
+    pw = None
+    logger.warning("pyworld is not installed. F0 features will be zeros.")
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +121,17 @@ def extract_frame_features(audio: np.ndarray, sr: int = 16000, config: Optional[
         
     # Pyworld F0 (dio + stonemask)
     audio_f64 = audio.astype(np.float64)
-    _f0_hz, _times = pw.dio(audio_f64, sr, frame_period=hop_length_ms)
-    f0_hz = pw.stonemask(audio_f64, _f0_hz, _times, sr)
+    if pw is not None:
+        _f0_hz, _times = pw.dio(audio_f64, sr, frame_period=hop_length_ms)
+        f0_hz = pw.stonemask(audio_f64, _f0_hz, _times, sr)
+    else:
+        # Fallback: use librosa pyin
+        f0_hz_raw, voiced_flag, voiced_probs = librosa.pyin(
+            audio, sr=sr, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7'),
+            hop_length=hop_length
+        )
+        f0_hz = np.nan_to_num(f0_hz_raw)
+        _times = librosa.frames_to_time(np.arange(len(f0_hz)), sr=sr, hop_length=hop_length)
     f0_log_st = hz_to_log_st(f0_hz)
     
     # Librosa features
